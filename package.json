@@ -1,0 +1,12 @@
+{
+  "name": "paseo-plugins",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local Paseo plugins, one folder per plugin",
+  "workspaces": [
+    "plugins/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

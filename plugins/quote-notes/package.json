@@ -1,0 +1,52 @@
+{
+  "name": "@xzthemeofsss/paseo-quote-notes",
+  "version": "0.2.2",
+  "description": "Annotate selected chat, file, Markdown, Diff, and terminal text in Paseo with comments.",
+  "keywords": [
+    "chat",
+    "paseo",
+    "paseo-plugin",
+    "quote",
+    "reply"
+  ],
+  "homepage": "https://github.com/xzthemeofsss/paseo-plugins#readme",
+  "bugs": {
+    "url": "https://github.com/xzthemeofsss/paseo-plugins/issues"
+  },
+  "license": "MIT",
+  "author": "xzthemeofsss",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xzthemeofsss/paseo-plugins.git"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.client.tsx",
+    "client/",
+    "assets/",
+    "index.server.ts",
+    "shared/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.11.2",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "~19.2.0",
+    "@types/react-dom": "19.2.3",
+    "esbuild": "^0.28.2",
+    "jsdom": "^29.1.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.8"
+  }
+}
