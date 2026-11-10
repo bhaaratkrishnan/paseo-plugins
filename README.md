@@ -11,6 +11,15 @@ paseo-plugins/
     quote-notes/              # select text in chat/files and reply with a quoted annotation
 ```
 
+## Plugins
+
+| Plugin | What it does | Install |
+| --- | --- | --- |
+| [`quote-notes`](plugins/quote-notes) | Select text in chat, a file, Markdown preview, diff, or terminal and attach it to your next message as a quote with an optional comment | `paseo plugin add git:bhaaratkrishnan/paseo-plugins:plugins/quote-notes` |
+
+Every plugin installs independently. Add `--ref main` to pin the initial Git content, and see
+[Install](#install) for local checkouts and removal.
+
 ## Requirements
 
 - Paseo >= 0.15 (`paseo --version`)
@@ -30,7 +39,13 @@ Source edits need `paseo plugin reload <id>`; do not restart the daemon.
 
 ## Install
 
-Absolute paths only (a bare relative path is read as a registry id):
+From the public repo:
+
+```bash
+paseo plugin add git:bhaaratkrishnan/paseo-plugins:plugins/quote-notes
+```
+
+From a local checkout (absolute paths only; a bare relative path is read as a registry id):
 
 ```bash
 paseo plugin install /absolute/path/paseo-plugins/plugins/quote-notes
