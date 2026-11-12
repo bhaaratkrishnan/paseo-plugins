@@ -25,11 +25,14 @@ header{display:flex;align-items:center;justify-content:space-between;padding:10p
 .source{display:block;width:100%;text-align:left;border:0;background:none;padding:0}.comment{margin-top:6px;color:var(--quote-muted);white-space:pre-wrap;overflow-wrap:anywhere}.editor{padding:10px}.footer{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}.status,.location{font-size:11px;color:var(--quote-muted)}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0 0;user-select:text;-webkit-user-select:text}
 .notice{padding:0 12px 10px;color:var(--quote-muted)}.notice:empty{display:none}
 .save-state{font-size:11px;color:var(--quote-muted);margin-top:4px}.retry{border:0;background:transparent;text-decoration:underline;padding:2px 0}
-.editor{position:relative;padding:4px 12px;border-radius:18px}
-.comment-row{position:relative}.editor .location:empty{display:none}.editor .location:not(:empty){padding:4px 0}
-.editor .footer{position:absolute;top:4px;right:0;margin:0;height:28px;align-items:center}
-.editor .footer button{display:inline-flex;align-items:center;justify-content:center;height:28px;border:0;border-radius:50%;background:transparent;padding:0;color:var(--quote-muted)}
-.editor .footer button[hidden]{display:none}.editor .footer button[data-action="finish"]{width:28px}.editor .footer button:hover{background:var(--quote-hover)}
+.editor{position:relative;padding:10px 12px;border-radius:12px;box-shadow:0 10px 30px #00000059}
+.editor:focus-within{border-color:color-mix(in srgb,var(--quote-fg) 26%,transparent)}
+.comment-row{position:relative}.editor .location:empty{display:none}.editor .location:not(:empty){padding:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.2px;color:var(--quote-muted)}
+.editor .footer{position:absolute;top:7px;right:7px;margin:0;height:26px;align-items:center}
+.editor .footer button{display:inline-flex;align-items:center;justify-content:center;height:26px;width:26px;border:0;border-radius:50%;background:transparent;padding:0;color:var(--quote-muted)}
+.editor .footer button[hidden]{display:none}.editor .footer button[data-action="finish"]{width:26px;background:var(--quote-fg);color:var(--quote-bg)}
+.editor .footer button:hover{background:var(--quote-hover)}.editor .footer button[data-action="finish"]:hover{background:var(--quote-fg);filter:brightness(1.12)}
+::slotted(textarea)::placeholder{color:var(--quote-muted);opacity:1}
 .feedback{display:none;align-items:flex-start;gap:8px;padding:4px 0}.feedback .status{flex:1;overflow-wrap:anywhere}.feedback .retry{flex-shrink:0}
 .editor:has([data-action="retry"]:not([hidden])) .feedback{display:flex}
 .editor.edit-card{padding:8px 12px;border-radius:22px;gap:8px}
@@ -220,7 +223,7 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
     element.setAttribute("data-paseo-quote-editor", "");
     element.setAttribute("contenteditable", "true");
     element.setAttribute("aria-readonly", "true");
-    element.style.cssText = "position:fixed;z-index:2147483646;width:294px;max-width:calc(100vw - 16px)";
+    element.style.cssText = "position:fixed;z-index:2147483646;width:380px;max-width:calc(100vw - 16px)";
     palette(element, bindingElement(ref.binding));
     const shadow = element.attachShadow({ mode: "open" });
     const footer = input.kind === "create"
@@ -232,7 +235,7 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
     field.setAttribute("aria-label", "Add a comment"); field.setAttribute("data-paseo-quote-comment", "");
     for (const [property, value] of [
       ["all", "unset"], ["display", "block"], ["box-sizing", "border-box"], ["width", "100%"], ["min-height", "36px"], ["max-height", input.kind === "edit" ? "180px" : "160px"],
-      ["margin", "0"], ["padding", input.kind === "edit" ? "8px 0" : "8px 36px 8px 0"], ["border", "0"], ["outline", "none"], ["box-shadow", "none"], ["border-radius", "0"],
+      ["margin", "0"], ["padding", input.kind === "edit" ? "8px 0" : "10px 34px 10px 0"], ["border", "0"], ["outline", "none"], ["box-shadow", "none"], ["border-radius", "0"],
       ["background", "transparent"], ["color", "var(--quote-fg)"], ["font-family", "var(--quote-font)"], ["font-size", "13px"], ["line-height", "20px"],
       ["white-space", "pre-wrap"], ["overflow-wrap", "anywhere"], ["overflow-y", "auto"], ["resize", "none"],
       ["user-select", "text"], ["-webkit-user-select", "text"], ["cursor", "text"],
@@ -422,12 +425,15 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
     if (!binding.pane.isConnected || rect.width <= 0 || rect.height <= 0) return { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight };
     return { left: Math.max(0, rect.left), right: Math.min(window.innerWidth, rect.right), top: Math.max(0, rect.top), bottom: Math.min(window.innerHeight, rect.bottom) };
   }
-  function place(element: HTMLElement, anchor: DOMRect, bounds: { left: number; right: number; top: number; bottom: number }) {
-    const width = Math.min(294, Math.max(0, bounds.right - bounds.left - 16));
+  function place(element: HTMLElement, rects: DOMRect[], bounds: { left: number; right: number; top: number; bottom: number }, preferredWidth = 294) {
+    const width = Math.min(preferredWidth, Math.max(0, bounds.right - bounds.left - 16));
     element.style.width = `${width}px`;
     const height = element.offsetHeight;
-    const above = anchor.top - height - 8;
-    const top = above >= bounds.top + 8 ? above : anchor.bottom + 8;
+    const first = rects[0], last = rects[rects.length - 1] ?? first;
+    const above = first.top - height - 8;
+    const useAbove = above >= bounds.top + 8;
+    const anchor = useAbove ? first : last;
+    const top = useAbove ? above : anchor.bottom + 8;
     element.style.left = `${Math.max(bounds.left + 8, Math.min(anchor.left + anchor.width / 2 - width / 2, bounds.right - width - 8))}px`;
     element.style.top = `${Math.max(bounds.top + 8, Math.min(top, bounds.bottom - height - 8))}px`;
     element.style.maxHeight = `${Math.max(0, bounds.bottom - bounds.top - 16)}px`;
@@ -440,7 +446,7 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
     if (preview) {
       if (bindingStatus(preview.projection.binding) === "scope-changed") closePreview(false);
       else {
-        place(preview.element, preview.projection.button.getBoundingClientRect(), paneBounds(preview.projection.binding));
+        place(preview.element, [preview.projection.button.getBoundingClientRect()], paneBounds(preview.projection.binding));
         for (const [id, row] of preview.rows) {
           row.source.disabled = !hasLocation(preview.projection.binding, id);
           row.source.title = row.source.disabled ? "Source position unavailable" : "Show source";
@@ -455,9 +461,9 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
         const geometry: SourceGeometry = sourceFor(view.ref.binding, view.ref.id) ? sources.geometry(view.scope, view.ref.id, bindingCard(view.ref.binding)) : { kind: "unavailable" };
         const projection = isStoreBinding(view.ref.binding) ? undefined : projections.get(view.ref.binding.input);
         if (geometry.kind === "visible") {
-          place(view.element, geometry.rects[0], geometry.bounds); view.location.textContent = "";
+          place(view.element, geometry.rects, geometry.bounds, 380); view.location.textContent = "";
         } else {
-          place(view.element, (projection?.button ?? bindingElement(view.ref.binding)).getBoundingClientRect(), paneBounds(view.ref.binding));
+          place(view.element, [(projection?.button ?? bindingElement(view.ref.binding)).getBoundingClientRect()], paneBounds(view.ref.binding), 380);
           view.location.textContent = geometry.kind === "offscreen" ? "Source is outside the visible area" : "Source position unavailable";
         }
         active = true;
