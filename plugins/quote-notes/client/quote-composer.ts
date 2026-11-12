@@ -645,7 +645,7 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
         if (!active) return;
         const unavailable = (event: Event) => {
           const element = event.target instanceof Element ? event.target : null;
-          const root = element?.closest<HTMLElement>('[data-testid="workspace-file-pane"],[data-testid="git-diff-canvas-root"],[data-testid="terminal-surface"]');
+          const root = element?.closest<HTMLElement>('[data-testid="workspace-file-pane"]');
           if (currentHostId(window.location.href) === options.owner.hostId && root && root.getClientRects().length) listener({ kind: "unavailable", root, reason: reason(cause) });
         };
         document.addEventListener("pointerup", unavailable, true); document.addEventListener("keyup", unavailable, true);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { currentHostId, resolveModuleIds, reason, type InstallationOwner, type StoreBinding } from "./host-draft-bridge";
-import { fingerprint, type ExternalOrigin, type ExternalSnapshot, type FileIdentity, type WorkspaceIdentity } from "./external-origin";
+import { fingerprint, type ExternalSnapshot, type FileIdentity, type WorkspaceIdentity } from "./external-origin";
 import type { ExternalLiveSource, SourceGeometry } from "./quote-sources";
 
 const callable = z.custom<(...args: unknown[]) => unknown>((x) => typeof x === "function");
@@ -13,8 +13,6 @@ const directorySchema = z.object({ agents: mapSchema, agentDetails: mapSchema, w
 const layoutSchema = z.object({ root: z.unknown(), focusedPaneId: z.string().nullable().optional(), parentTabIdByTabId: z.record(z.string(), z.string()).optional() }).passthrough();
 const storeSchema = z.object({ layoutByWorkspace: z.record(z.string(), z.unknown()), sheetsByWorkspace: z.record(z.string(), z.array(z.object({ tab: tabSchema, parentTabId: z.string().nullable().optional() }).passthrough())) }).passthrough();
 const routeSchema = z.object({ serverId: nonempty, workspaceId: nonempty });
-const positionSchema = z.object({ fileIndex: z.number().int().nonnegative(), rowIndex: z.number().int().nonnegative(), cellIndex: z.number().int().nonnegative(), side: z.enum(["old", "new"]), sourceOffset: z.number().int().nonnegative() });
-const selectionSchema = z.object({ anchor: positionSchema, focus: positionSchema });
 const pointSchema = z.object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative() });
 const terminalPositionSchema = z.object({ start: pointSchema, end: pointSchema });
 export const SOURCE_MODULE_SIGNATURES = {
@@ -31,7 +29,6 @@ const CAPABILITIES = {
   paths: { paths: ["normalizeWorkspaceFileLocation", "resolveWorkspaceFilePaths", "createWorkspaceFileTabTarget"] },
   opener: { opener: ["openWorkspaceTargetAtLocation", "openWorkspaceTargetBeside"] },
   editor: { editor: ["EditorView", "Decoration", "ViewPlugin"] },
-  diff: { diff: ["DiffSurface"], diffSelection: ["orderedSelection", "selectedSourceText", "selectCellSource"] },
 };
 function field(value: unknown, key: string): unknown { return value !== null && (typeof value === "object" || typeof value === "function") ? Reflect.get(value, key) : undefined; }
 function functions(value: unknown, names: string[]) { return z.record(z.string(), callable).parse(Object.fromEntries(names.map((name) => [name, field(value, name)]))); }
@@ -379,101 +376,6 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
     });
   };
 
-  interface DiffCell { content: string; type: string; lineNumber: number | null; sourceIdentity: { hunkIndex: number; lineIndex: number; side: "old" | "new" } | null; reviewTarget: { filePath: string; side: "old" | "new"; oldLineNumber: number | null; newLineNumber: number | null; lineNumber: number; content: string; hunkIndex: number; lineIndex: number } | null }
-  interface DiffModel { files: Array<{ path: string; file: { path: string; oldPath?: string; isNew: boolean; isDeleted: boolean; hunks: unknown[] } }>; rows: Array<{ kind: string; path: string; fileIndex: number; cells: Array<DiffCell | null> }>; layout: "split" | "unified" }
-  const diffModelSchema = z.custom<DiffModel>((value) => z.object({ files: z.array(z.object({ path: nonempty, file: z.object({ path: nonempty, oldPath: z.string().optional(), isNew: z.boolean(), isDeleted: z.boolean(), hunks: z.array(z.unknown()) }).passthrough() }).passthrough()), rows: z.array(z.object({ kind: z.string() }).passthrough()), layout: z.enum(["split", "unified"]) }).safeParse(value).success);
-  const diffBinding = (root: HTMLElement) => {
-    const ids = capability("diff"), Component = callable.parse(field(requireModule(ids.diff), "DiffSurface")), canvas = root.querySelector('[data-testid="git-diff-canvas"]'), scroll = root.querySelector('[data-testid="git-diff-scroll"]');
-    if (!(canvas instanceof HTMLCanvasElement) || !(scroll instanceof HTMLElement)) throw new Error("The diff canvas API changed.");
-    const matches = currentFibers(root).flatMap((entry) => {
-      if (entry.fiber.type !== Component) return [];
-      const values = hooks(entry.fiber), result: Array<{ entry: typeof entry; model: DiffModel; selection: unknown; modelRef: unknown; selectionRef: unknown; offsets: Map<unknown, unknown>; scroll: HTMLElement }> = [];
-      for (let i = 0; i + 10 < values.length; i++) {
-        const refs = values.slice(i, i + 11); if (!refs.every((value) => typeof value === "object" && value !== null && Object.hasOwn(value, "current"))) continue;
-        const v = refs.map((value) => field(value, "current"));
-        if (v[0] !== root || v[1] !== canvas || v[4] !== scroll || !Array.isArray(v[2]) || v[2].length !== 2 || !(v[9] instanceof Map) || v[5] !== v[6]) continue;
-        const model = diffModelSchema.safeParse(v[5]), propsFiles = field(entry.fiber.memoizedProps, "files");
-        if (!model.success || !Array.isArray(propsFiles) || model.data.files.length !== propsFiles.length || !model.data.files.every((file, i) => file.file === propsFiles[i])) continue;
-        result.push({ entry, model: model.data, selection: v[10], modelRef: refs[5], selectionRef: refs[10], offsets: v[9], scroll });
-      }
-      return result;
-    });
-    if (matches.length !== 1) throw new Error("The diff source model API is ambiguous.");
-    const match = matches[0], captured = contextFor(root, match.entry);
-    return { ...match, captured, helpers: functions(requireModule(ids.diffSelection), ["orderedSelection", "selectedSourceText", "selectionRectangles"]) };
-  };
-  const captureDiff = (root: HTMLElement): ExternalSelection => {
-    const binding = diffBinding(root), { model, captured, helpers } = binding;
-    if (!binding.selection) return null;
-    const selection = selectionSchema.parse(binding.selection), ordered = z.object({ start: positionSchema, end: positionSchema }).parse(helpers.orderedSelection(selection)), { start, end } = ordered;
-    const text = z.string().parse(helpers.selectedSourceText(model, selection)); if (!text.length) return null;
-    if (start.fileIndex !== end.fileIndex) throw new Error("Cross-file diff selections are not supported.");
-    const cells: Array<{ cell: DiffCell; path: string; fileIndex: number; from: number; to: number }> = [], oneColumn = model.layout === "split" && start.cellIndex === end.cellIndex;
-    const compare = (a: { rowIndex: number; cellIndex: number }, b: { rowIndex: number; cellIndex: number }) => a.rowIndex - b.rowIndex || a.cellIndex - b.cellIndex;
-    for (const endpoint of [start, end]) {
-      const row = model.rows[endpoint.rowIndex], cell = row?.cells?.[endpoint.cellIndex];
-      if (!row || row.fileIndex !== endpoint.fileIndex || !cell || endpoint.sourceOffset > cell.content.length || cell.sourceIdentity?.side !== endpoint.side) throw new Error("The diff selection changed.");
-    }
-    for (let rowIndex = start.rowIndex; rowIndex <= end.rowIndex; rowIndex++) {
-      const row = model.rows[rowIndex]; if (!row || row.kind !== "line" || !Array.isArray(row.cells)) throw new Error("Select consecutive diff lines.");
-      row.cells.forEach((cell, cellIndex) => {
-        if (!cell || oneColumn && cellIndex !== start.cellIndex || compare({ rowIndex, cellIndex }, start) < 0 || compare({ rowIndex, cellIndex }, end) > 0) return;
-        const from = rowIndex === start.rowIndex && cellIndex === start.cellIndex ? start.sourceOffset : 0, to = rowIndex === end.rowIndex && cellIndex === end.cellIndex ? end.sourceOffset : cell.content.length;
-        cells.push({ cell, path: row.path, fileIndex: row.fileIndex, from, to });
-      });
-    }
-    if (!cells.length || cells.map(({ cell, from, to }) => cell.content.slice(from, to)).join("\n") !== text) throw new Error("The diff selection text contract changed.");
-    if (new Set(cells.map((c) => c.fileIndex)).size !== 1 || new Set(cells.map((c) => c.path)).size !== 1) throw new Error("Cross-file diff selections are not supported.");
-    if (new Set(cells.map((c) => c.cell.sourceIdentity?.side)).size !== 1) throw new Error("Selections across both sides of a diff are not supported.");
-    const first = cells[0], last = cells[cells.length - 1], file = model.files[first.fileIndex];
-    if (!file || file.path !== first.path) throw new Error("The diff file identity is ambiguous.");
-    const side = z.enum(["old", "new"]).parse(first.cell.sourceIdentity?.side);
-    cells.forEach(({ cell, path }, i) => {
-      const identity = cell.sourceIdentity, target = cell.reviewTarget;
-      if (cell.type === "header" || !identity || !target || !Number.isInteger(cell.lineNumber) || cell.lineNumber === null || cell.lineNumber < 1 || target.side !== side || identity.side !== side || target.filePath !== path || target.content !== cell.content || target.hunkIndex !== identity.hunkIndex || target.lineIndex !== identity.lineIndex || target.lineNumber !== cell.lineNumber || (side === "old" ? target.oldLineNumber : target.newLineNumber) !== cell.lineNumber) throw new Error("Select diff source code lines; block headers cannot be added.");
-      if (i && cell.lineNumber !== Number(cells[i - 1].cell.lineNumber) + 1) throw new Error("Non-consecutive diff source lines are not supported.");
-    });
-    const props = binding.entry.fiber.memoizedProps, mode = z.object({ kind: z.enum(["commit", "working"]) }).passthrough().parse(field(props, "mode"));
-    let revision: Extract<ExternalOrigin, { kind: "diff" }>["revision"];
-    if (mode.kind === "commit") {
-      if (captured.context.target.kind !== "commit_diff") throw new Error("Could not verify the diff commit source.");
-      revision = { kind: "commit", sha: nonempty.parse(field(captured.context.target, "sha")) };
-    } else {
-      const changesIds = resolveModuleIds(source, { changes: ["ChangesSurface", "resolveDiffLayout", "DiffModeMenu"] }), ChangesSurface = callable.parse(field(requireModule(changesIds.changes), "ChangesSurface"));
-      const owners = binding.entry.ancestors.filter((fiber) => fiber.type === ChangesSurface); if (owners.length !== 1) throw new Error("Could not verify the workspace diff comparison source.");
-      const owner = owners[0], ownerProps = z.object({ serverId: nonempty, workspaceId: nonempty, cwd: nonempty }).parse(owner.memoizedProps);
-      if (ownerProps.serverId !== captured.workspace.serverId || ownerProps.cwd !== captured.workspace.root || scope({ ...captured.context, workspaceId: ownerProps.workspaceId }).workspaceId !== captured.workspace.workspaceId) throw new Error("The workspace diff source changed.");
-      const data = field(field(owner.updateQueue, "memoCache"), "data"); if (!Array.isArray(data)) throw new Error("The workspace diff comparison API changed.");
-      const matches = data.flatMap((row) => {
-        if (!Array.isArray(row)) return [];
-        return row.flatMap((value) => {
-          if (field(value, "files") !== field(props, "files") || field(value, "reviewActions") !== field(mode, "reviewActions") || !["base", "uncommitted"].includes(String(field(value, "diffMode"))) || !["status", "baseRef", "isDiffLoading", "diffPayloadError"].every((key) => value && typeof value === "object" && Object.hasOwn(value, key))) return [];
-          return row.flatMap((options) => field(options, "serverId") === captured.workspace.serverId && field(options, "cwd") === captured.workspace.root && field(options, "mode") === field(value, "diffMode") && field(options, "baseRef") === field(value, "baseRef") && typeof field(options, "ignoreWhitespace") === "boolean" && options && typeof options === "object" && Object.hasOwn(options, "enabled") ? [{ value, options }] : []);
-        });
-      });
-      if (matches.length !== 1) throw new Error("The workspace diff comparison source is ambiguous.");
-      const comparison = z.enum(["base", "uncommitted"]).parse(field(matches[0].value, "diffMode"));
-      revision = { kind: "working", mode: comparison, baseRef: comparison === "base" ? nonempty.parse(field(matches[0].value, "baseRef")).trim() : null, ignoreWhitespace: z.boolean().parse(field(matches[0].options, "ignoreWhitespace")), revisionResolution: "unresolved" };
-    }
-    if (field(binding.modelRef, "current") !== model || field(binding.selectionRef, "current") !== binding.selection) throw new Error("The diff selection changed.");
-    const lineStart = z.number().int().positive().parse(first.cell.lineNumber), lineEnd = last.to === 0 && cells.length > 1 ? Number(cells[cells.length - 2].cell.lineNumber) : z.number().int().positive().parse(last.cell.lineNumber);
-    const canonicalHunks = z.array(z.object({ oldStart: z.number(), oldCount: z.number(), newStart: z.number(), newCount: z.number(), lines: z.array(z.object({ type: z.string(), content: z.string() })) })).parse(file.file.hunks);
-    const sourceFile = fileIdentity(side === "old" ? file.file.oldPath ?? file.path : file.path, captured.workspace), canonical = JSON.stringify({ path: file.path, oldPath: file.file.oldPath ?? null, isNew: file.file.isNew, isDeleted: file.file.isDeleted, hunks: canonicalHunks });
-    const snapshot = fingerprint(canonical).then((version): ExternalSnapshot => ({ text, title: `${file.path}:${lineStart}-${lineEnd} · ${side === "old" ? "old" : "new"} side`, origin: { kind: "diff", workspace: captured.workspace, tabId: captured.context.tabId, segment: { file: sourceFile, displayPath: file.path, oldPath: file.file.oldPath ?? null, side, lineStart, lineEnd, startColumn: first.from, endColumn: last.to, cells: cells.map(({ cell, from, to }) => ({ lineNumber: Number(cell.lineNumber), hunkIndex: Number(cell.sourceIdentity?.hunkIndex), lineIndex: Number(cell.sourceIdentity?.lineIndex), type: cell.type, from, to })) }, revision, version } }));
-    const contextValid = sourceGuard(root, captured);
-    const valid = () => { try { const current = diffBinding(root); return visible(root) && current.model === model && sameTarget(current.captured, captured); } catch { return false; } };
-    return makeOffer(root, captured, [model, canonical, JSON.stringify(ordered), JSON.stringify(revision)], snapshot, valid, () => {
-      if (!contextValid() || field(binding.modelRef, "current") !== model) return { kind: "unavailable" };
-      const box = root.getBoundingClientRect(), bounds = { left: Math.max(0, box.left), right: Math.min(innerWidth, box.right), top: Math.max(0, box.top), bottom: Math.min(innerHeight, box.bottom) };
-      const rectangles = z.array(z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number(), fileIndex: z.number().int(), clipX: z.number(), clipWidth: z.number() })).parse(helpers.selectionRectangles({ model, selection }));
-      const rects = rectangles.flatMap((rect) => {
-        const offset = Number(binding.offsets.get(model.files[rect.fileIndex]?.path) ?? 0), left = Math.max(bounds.left, box.left + rect.clipX, box.left + rect.x - offset), right = Math.min(bounds.right, box.left + rect.clipX + rect.clipWidth, box.left + rect.x - offset + rect.width), top = Math.max(bounds.top, box.top + rect.y - binding.scroll.scrollTop), bottom = Math.min(bounds.bottom, box.top + rect.y - binding.scroll.scrollTop + rect.height);
-        return right > left && bottom > top ? [new DOMRect(left, top, right - left, bottom - top)] : [];
-      });
-      return rects.length ? { kind: "visible", rects, bounds } : { kind: "offscreen" };
-    }, async () => reveal(await snapshot));
-  };
-
   const reveal: SourceHost["reveal"] = async (snapshot) => {
     const { origin } = snapshot;
     if (!scopeValid(origin.workspace)) return { kind: "unavailable", reason: "Return to the original workspace to locate the source." };
@@ -495,15 +397,15 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
       }
     }
     if (!scopeValid(origin.workspace)) return { kind: "unavailable", reason: "The workspace changed." };
-    const target = origin.kind === "diff" ? origin.revision.kind === "commit" ? { kind: "commit_diff", sha: origin.revision.sha } : { kind: "working_diff", focusPath: origin.segment.displayPath, focusRequestId: Date.now() }
-      : pathFunctions().createWorkspaceFileTabTarget(pathFunctions().normalizeWorkspaceFileLocation({ path: origin.file.requestedPath }));
+    if (origin.kind !== "file" && origin.kind !== "markdown") return { kind: "unavailable", reason: "This source is no longer supported." };
+    const target = pathFunctions().createWorkspaceFileTabTarget(pathFunctions().normalizeWorkspaceFileLocation({ path: origin.file.requestedPath }));
     if (!target) return { kind: "unavailable", reason: "The source path could not be verified." };
     const opened = functions(requireModule(capability("opener").opener), ["openWorkspaceTargetAtLocation"]).openWorkspaceTargetAtLocation({ workspaceKey: origin.workspace.workspaceKey, target, location: "main" });
-    return typeof opened === "string" && opened.length ? { kind: "opened", reason: origin.kind === "diff" ? "Opened the diff. The source line position is unavailable." : "Opened the file. The source position was not verified." } : { kind: "unavailable", reason: "Could not open the source tab." };
+    return typeof opened === "string" && opened.length ? { kind: "opened", reason: "Opened the file. The source position was not verified." } : { kind: "unavailable", reason: "Could not open the source tab." };
   };
   const rootFor = (target?: EventTarget | null): HTMLElement | null => {
     const element = target instanceof HTMLElement ? target : target instanceof Node ? target.parentElement : null;
-    return element?.closest<HTMLElement>('[data-testid="terminal-surface"][data-terminal-scrollbar-root="true"],[data-testid="git-diff-canvas-root"],[data-testid="workspace-file-pane"]') ?? null;
+    return element?.closest<HTMLElement>('[data-testid="workspace-file-pane"]') ?? null;
   };
   const capture: SourceHost["capture"] = (target) => {
     if (disposed) return null;
@@ -512,8 +414,6 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
     const selection = window.getSelection(), root = rootFor(target) ?? rootFor(selection?.anchorNode);
     if (!root || !visible(root)) return null;
     try {
-      if (root.matches('[data-testid="terminal-surface"]')) return captureTerminal(root);
-      if (root.matches('[data-testid="git-diff-canvas-root"]')) return captureDiff(root);
       return captureFile(root);
     } catch (error) { return { kind: "unavailable", root, reason: reason(error) }; }
   };
@@ -523,7 +423,6 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
     observe(listener) {
       let frame = 0, scanFrame = 0, activeRoot: HTMLElement | null = null, stopped = false;
       let lastSelection: ExternalSelection = null, refreshPending = false;
-      const terminals = new Map<HTMLElement, { terminal: Terminal; dispose(): void }>();
       const publish = (target?: EventTarget | null, refresh = true) => {
         if (stopped || disposed) return;
         if (target) activeRoot = rootFor(target);
@@ -536,18 +435,6 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
       };
       const scan = () => {
         scanFrame = 0; reconcileRoute();
-        for (const [root, bound] of terminals) {
-          let current: Terminal | null = null; try { if (visible(root)) current = terminalBinding(root).terminal; } catch {}
-          if (current !== bound.terminal) { bound.dispose(); terminalEpochs.get(bound.terminal)?.dispose(); terminalEpochs.delete(bound.terminal); terminals.delete(root); }
-        }
-        for (const root of document.querySelectorAll<HTMLElement>('[data-testid="terminal-surface"][data-terminal-scrollbar-root="true"]')) {
-          if (terminals.has(root) || !visible(root)) continue;
-          try {
-            const { terminal } = terminalBinding(root), onChange = terminal.onSelectionChange(() => publish(root)), onScroll = terminal.onScroll(() => { if (activeRoot === root) publish(root, false); });
-            const resize = new ResizeObserver(() => { if (activeRoot === root) publish(root, false); }); resize.observe(root);
-            terminals.set(root, { terminal, dispose: () => { onChange.dispose(); onScroll.dispose(); resize.disconnect(); } });
-          } catch {}
-        }
         if (activeRoot && (!visible(activeRoot) || lastSelection?.kind === "offer" && !lastSelection.offer.validForAdd())) { activeRoot = null; lastSelection = null; listener(null); }
       };
       const scheduleScan = () => { if (!scanFrame && !stopped) scanFrame = requestAnimationFrame(scan); };
@@ -561,7 +448,7 @@ export function createSourceHost(requireModule: (id: number) => unknown, source:
       window.addEventListener("resize", viewport); window.addEventListener("scroll", viewport, true); scheduleScan();
       const cleanup = () => {
         if (stopped) return; stopped = true; cancelAnimationFrame(frame); cancelAnimationFrame(scanFrame); observer.disconnect();
-        for (const bound of terminals.values()) bound.dispose(); terminals.clear(); unlayout(); unsession();
+        unlayout(); unsession();
         document.removeEventListener("pointerup", pointer, true); document.removeEventListener("keyup", pointer, true); document.removeEventListener("selectionchange", selection);
         window.removeEventListener("resize", viewport); window.removeEventListener("scroll", viewport, true); cleanups.delete(cleanup);
       };

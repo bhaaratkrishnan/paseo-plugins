@@ -7,15 +7,10 @@ const workspace = z.object({ serverId: name, workspaceId: name, workspaceKey: na
 const file = z.object({ requestedPath: name, absolutePath: name.nullable(), relativePath: name.nullable() }).strict();
 const version = z.object({ algorithm: z.literal("sha256"), digest: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const point = z.object({ x: integer, y: integer }).strict();
-const segment = z.object({ file, side: z.enum(["old", "new"]), lineStart: integer.positive(), lineEnd: integer.positive(), startColumn: integer, endColumn: integer, displayPath: name, oldPath: name.nullable(), cells: z.array(z.object({ lineNumber: integer.positive(), hunkIndex: integer, lineIndex: integer, type: name, from: integer, to: integer }).strict()).min(1).max(512) }).strict().refine((x) => x.lineEnd >= x.lineStart);
 export const externalOriginSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("file"), workspace, tabId: name, file, from: integer, to: integer, lineStart: integer.positive(), lineEnd: integer.positive(), version }).strict().refine((x) => x.to > x.from && x.lineEnd >= x.lineStart),
   z.object({ kind: z.literal("markdown"), workspace, tabId: name, file, version }).strict(),
   z.object({ kind: z.literal("terminal"), workspace, tabId: name, terminalId: name, cwd: name, streamKey: name, buffer: z.enum(["normal", "alternate"]), start: point, end: point, cols: integer.positive(), rows: integer.positive(), version }).strict(),
-  z.object({ kind: z.literal("diff"), workspace, tabId: name, segment, revision: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("commit"), sha: name }).strict(),
-    z.object({ kind: z.literal("working"), mode: z.enum(["uncommitted", "base"]), baseRef: name.nullable(), ignoreWhitespace: z.boolean(), revisionResolution: z.literal("unresolved") }).strict(),
-  ]), version }).strict(),
 ]);
 export type ExternalOrigin = z.infer<typeof externalOriginSchema>;
 export type WorkspaceIdentity = ExternalOrigin["workspace"];
