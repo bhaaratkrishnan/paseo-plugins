@@ -37,7 +37,7 @@ button:hover{background:var(--quote-hover)}button:focus-visible{outline:2px soli
 .entry-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--quote-muted)}.entry-head>span{min-width:0;overflow-wrap:anywhere}.copy{flex-shrink:0;white-space:nowrap;border:0;border-radius:5px;background:transparent;padding:3px 6px}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0 0;user-select:text;-webkit-user-select:text}
 `;
 
-export function installSentQuotes(options: { owner: InstallationOwner; discover?: (signal: AbortSignal) => Promise<SentNative> }): () => void {
+export function installSentQuotes(options: { owner: InstallationOwner; discover?: (signal: AbortSignal) => Promise<SentNative>; display?: "capsule" | "hidden" }): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") return () => {};
   const doc = document, view = window;
   const lifetime = new AbortController();
@@ -228,6 +228,19 @@ export function installSentQuotes(options: { owner: InstallationOwner; discover?
     panel.style.top = `${Math.max(top, Math.min(rect.bottom + 6, bottom - height))}px`;
   }
   function create(row: SentRow): Decoration {
+    if (options.display === "hidden") {
+      // Keep the native attachment hidden without drawing anything in the transcript.
+      const element = doc.createElement("div");
+      element.setAttribute(OWNED, "hidden");
+      element.style.setProperty("display", "none", "important");
+      const popup = doc.createElement("div");
+      popup.setAttribute(OWNED, "popup");
+      popup.style.setProperty("display", "none", "important");
+      const button = doc.createElement("button");
+      const panel = doc.createElement("div");
+      panel.hidden = true;
+      return { row, element, popup, button, panel, expanded: false, overrides: [], close() {} };
+    }
     const element = doc.createElement("div");
     element.setAttribute(OWNED, "capsule");
     element.setAttribute("aria-busy", String(row.pending));

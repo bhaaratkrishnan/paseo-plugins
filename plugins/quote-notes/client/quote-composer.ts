@@ -11,13 +11,12 @@ import type { AnnotationKind } from "../shared/preferences";
 import { discoverSourceHost, type SourceHost, type ExternalOffer, type ExternalSelection } from "./host-source-bridge";
 export type { QuoteRef } from "./host-draft-bridge";
 
-const SOURCE_BADGE_SIZE = 28;
 const CSS = `
 :host{font-family:var(--quote-font,system-ui,sans-serif);font-size:12px;color:var(--quote-fg);line-height:1.45}
 *{box-sizing:border-box}button{font:inherit;color:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}
 .chip{height:29px;display:inline-flex;align-items:center;gap:5px;padding:0 10px;border:1px solid var(--quote-border);border-radius:999px;background:var(--quote-chip);color:var(--quote-muted);white-space:nowrap}
 .chip:hover{background:var(--quote-hover)}.chip:focus-visible,button:focus-visible{outline:2px solid var(--quote-muted);outline-offset:2px}
-.preview{border:1px solid var(--quote-border);border-radius:12px;background:var(--quote-bg);box-shadow:none;overflow:hidden;max-height:min(480px,65vh);display:flex;flex-direction:column}
+.preview{border:1px solid var(--quote-border);border-radius:12px;background-color:var(--quote-bg,Canvas);box-shadow:0 12px 36px #0004;overflow:hidden;max-height:min(480px,65vh);display:flex;flex-direction:column}
 header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--quote-border);font-weight:600}
 .close,.remove,.edit,.footer button{border:0;border-radius:5px;background:transparent;padding:3px 6px;color:var(--quote-muted)}.close:hover,.remove:hover,.edit:hover,.footer button:hover{background:var(--quote-hover)}
 .entries{overflow:auto;overscroll-behavior:contain}.entry{padding:11px 12px}.entry+.entry{border-top:1px solid var(--quote-border)}
@@ -75,7 +74,7 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
   let revision = 0;
   type Pending = { comment: string; revision: number } & ({ kind: "saving" } | { kind: "error"; reason: string });
   const pending = new Map<string, Map<QuoteRef["id"], Pending>>();
-  type Row = { element: HTMLDivElement; source: HTMLButtonElement; text: HTMLPreElement; comment: HTMLDivElement; label: HTMLSpanElement; edit: HTMLButtonElement; remove: HTMLButtonElement; status: HTMLDivElement };
+  type Row = { element: HTMLDivElement; source: HTMLButtonElement; text: HTMLPreElement; comment: HTMLDivElement; label: HTMLSpanElement; remove: HTMLButtonElement; status: HTMLDivElement };
   type Summary = { element: HTMLDivElement; projection: Projection; mode: "hover" | "pinned"; rows: Map<QuoteRef["id"], Row>; container: HTMLElement; heading: HTMLElement; notice: HTMLElement };
   let preview: Summary | null = null;
   type EditorView = { element: HTMLDivElement; field: HTMLTextAreaElement; status: HTMLElement; location: HTMLElement; retry: HTMLButtonElement; origin: HTMLElement; ref: QuoteRef; scope: string; composing: boolean; version: number };
@@ -288,17 +287,6 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
     element.append(field); document.body.append(element); resize();
     return view;
   }
-  function openEditor(projection: Projection, id: QuoteRef["id"], origin: HTMLElement) {
-    if (editor.kind === "edit" && editor.phase.kind === "writing") return;
-    const attachment = quotesFor(projection.binding).find((entry) => entry.item.id === id);
-    if (!attachment || bindingStatus(projection.binding) !== "ready") return;
-    const decoded = decodeAnnotation(attachment.item);
-    if (decoded.kind !== "editable") return;
-    const scope = scopeOf(projection.binding);
-    const view = createEditor({ binding: projection.binding, id }, origin, { kind: "edit", comment: pending.get(scope)?.get(id)?.comment ?? decoded.annotation.comment });
-    editor = { kind: "edit", view, phase: { kind: "idle" }, focusOnCommit: true };
-    view.field.focus({ preventScroll: true }); requestLayout();
-  }
   function closePreview(focus: boolean) {
     window.clearTimeout(closeTimer);
     if (!preview) return;
@@ -328,16 +316,14 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
         const element = document.createElement("div"); element.className = "entry";
         const head = document.createElement("div"); head.className = "entry-head";
         const label = document.createElement("span"); label.className = "entry-label";
-        const edit = document.createElement("button"); edit.className = "edit"; edit.textContent = "Edit";
         const remove = document.createElement("button"); remove.className = "remove"; remove.textContent = "Remove";
         const source = document.createElement("button"); source.className = "source";
         const text = document.createElement("pre"); source.append(text);
         const comment = document.createElement("div"); comment.className = "comment";
         const status = document.createElement("div"); status.className = "save-state";
-        head.append(label, edit, remove); element.append(head, source, comment, status);
-        row = { element, source, text, comment, label, edit, remove, status };
+        head.append(label, remove); element.append(head, source, comment, status);
+        row = { element, source, text, comment, label, remove, status };
         current.rows.set(id, row); current.container.append(element);
-        edit.addEventListener("click", () => openEditor(current.projection, id, current.projection.button));
         source.addEventListener("click", () => {
           const selection = window.getSelection();
           if (selection && !selection.isCollapsed && source.contains(selection.anchorNode)) return;
@@ -380,9 +366,8 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
       row.source.disabled = !hasLocation(binding, id);
       row.source.title = row.source.disabled ? "Source position unavailable" : "Show source";
       row.status.textContent = unsaved?.kind === "error" ? unsaved.reason : row.source.disabled ? "Source position unavailable" : "";
-      row.edit.disabled = decoded.kind !== "editable" || bindingStatus(binding) !== "ready";
       row.remove.disabled = bindingStatus(binding) !== "ready";
-      row.edit.setAttribute("aria-label", `Edit quote ${index + 1}`); row.remove.setAttribute("aria-label", `Remove quote ${index + 1}`);
+      row.remove.setAttribute("aria-label", `Remove quote ${index + 1}`);
     });
   }
   function openPreview(projection: Projection, mode: Summary["mode"]) {
@@ -478,48 +463,10 @@ export function installQuoteComposer(options: { owner: InstallationOwner; discov
         active = true;
       }
     }
-    for (const projection of projections.values()) {
-      const scope = scopeOf(projection.binding), entries = quotesFor(projection.binding);
-      let markers = decorations.get(projection);
-      if (!markers) { markers = new Map(); decorations.set(projection, markers); }
-      const ids = new Set(entries.map((entry) => entry.item.id));
-      for (const [id, decoration] of markers) if (!ids.has(id)) { decoration.element.remove(); markers.delete(id); }
-      const placed: Array<{ left: number; top: number }> = [];
-      entries.forEach((entry, index) => {
-        const geometry = bindingStatus(projection.binding) === "ready" && sourceFor(projection.binding, entry.item.id) ? sources.geometry(scope, entry.item.id, projection.binding.card) : { kind: "unavailable" };
-        let decoration = markers.get(entry.item.id);
-        if (geometry.kind !== "visible" || !("rects" in geometry)) { if (decoration) decoration.element.hidden = true; return; }
-        active = true;
-        if (!decoration) {
-          const element = document.createElement("div"); element.setAttribute("data-paseo-quote-source", "");
-          element.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483001";
-          element.setAttribute("contenteditable", "true"); element.setAttribute("aria-readonly", "true");
-          element.addEventListener("beforeinput", (event) => { event.preventDefault(); event.stopPropagation(); }, true);
-          const button = document.createElement("button"); button.type = "button";
-          button.style.cssText = `position:absolute;pointer-events:auto;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border:1px solid #e8eddf;background:#a7c080;color:#fff;border-radius:999px 999px 999px 0;min-width:${SOURCE_BADGE_SIZE}px;height:${SOURCE_BADGE_SIZE}px;font:500 13px/1 var(--quote-font,system-ui);padding:0 6px;box-shadow:0 1px 2px #0003;cursor:pointer`;
-          button.addEventListener("click", () => openEditor(projection, entry.item.id, projection.button));
-          palette(element, projection.binding.input);
-          element.append(button); document.body.append(element);
-          decoration = { element, button, highlights: [] }; markers.set(entry.item.id, decoration);
-        }
-        decoration.element.hidden = false;
-        if (decoration.button.textContent !== String(index + 1)) decoration.button.textContent = String(index + 1);
-        decoration.button.setAttribute("aria-label", `Edit quote ${index + 1}`);
-        const last = geometry.rects[geometry.rects.length - 1];
-        const spacing = SOURCE_BADGE_SIZE + 4;
-        const left = Math.min(last.right, geometry.bounds.right - spacing);
-        let top = Math.max(geometry.bounds.top, last.bottom - 12);
-        while (placed.some((point) => Math.abs(point.left - left) < spacing && Math.abs(point.top - top) < spacing)) top += spacing;
-        placed.push({ left, top });
-        decoration.button.style.left = `${left}px`;
-        decoration.button.style.top = `${top}px`;
-        while (decoration.highlights.length > geometry.rects.length) decoration.highlights.pop()?.remove();
-        geometry.rects.forEach((rect, i) => {
-          let highlight = decoration.highlights[i];
-          if (!highlight) { highlight = document.createElement("div"); decoration.highlights.push(highlight); decoration.element.prepend(highlight); }
-          highlight.style.cssText = `position:absolute;pointer-events:none;background:rgba(225,177,43,.18);border-bottom:1px solid rgba(190,145,25,.5);left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
-        });
-      });
+    // Annotations are shown in the composer capsule only; the transcript stays untouched.
+    for (const markers of decorations.values()) {
+      for (const marker of markers.values()) marker.element.remove();
+      markers.clear();
     }
     if (active) requestLayout();
   }

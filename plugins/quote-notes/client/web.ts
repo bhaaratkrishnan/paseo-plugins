@@ -441,7 +441,7 @@ export function installSelectionBar(client: PluginClientContext, preferences?: A
 
 function installOwnedSelectionBar(client: PluginClientContext, owner: InstallationOwner, preferences?: AnnotationPreferences, language?: SettingsLanguage): () => void {
  const quotes = installQuoteComposer({ owner, preferences });
- const removeSentQuotes = installSentQuotes({ owner });
+ const removeSentQuotes = installSentQuotes({ owner, display: "hidden" });
  const host = document.createElement("div");
  host.setAttribute("data-paseo-quote", "");
  host.setAttribute("contenteditable", "true");
