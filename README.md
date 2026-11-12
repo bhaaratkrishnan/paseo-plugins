@@ -17,7 +17,7 @@ paseo-plugins/
 | --- | --- | --- |
 | [`quote-notes`](plugins/quote-notes) | Select text in chat, a file, Markdown preview, diff, or terminal and attach it to your next message as a quote with an optional comment | `paseo plugin add git:bhaaratkrishnan/paseo-plugins:plugins/quote-notes` |
 
-Every plugin installs independently. Add `--ref main` to pin the initial Git content, and see
+Every plugin installs independently. Add `--ref master` to pin the initial Git content, and see
 [Install](#install) for local checkouts and removal.
 
 ## Requirements
